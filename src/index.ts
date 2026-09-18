@@ -30,6 +30,7 @@ function buildServer(): McpServer {
 async function main(): Promise<void> {
   const provider = new OwnerOAuthProvider();
   await provider.init();
+  await provider.checkWritable();
 
   const app = express();
   app.set('trust proxy', 1); // bakom Caddy
@@ -99,6 +100,10 @@ async function main(): Promise<void> {
     console.log(`Butiker: ${config.stores.map((s) => s.key).join(', ') || '(inga)'} | GA4: ${config.ga4Credentials ? 'ja' : 'nej'} | Dogshowpro: ${config.dogshowpro.serviceRoleKey ? 'ja' : 'nej'}`);
   });
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack ?? reason.message : reason);
+});
 
 main().catch((err) => {
   console.error(err);

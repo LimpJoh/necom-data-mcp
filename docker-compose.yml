@@ -16,4 +16,4 @@ services:
     volumes:
       - /opt/necom-data-mcp/data:/app/data
     ports:
-      - "127.0.0.1:3010:3010"
+      - "127.0.0.1:3006:3010"

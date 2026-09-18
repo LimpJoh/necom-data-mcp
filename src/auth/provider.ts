@@ -84,12 +84,29 @@ export class OwnerOAuthProvider implements OAuthServerProvider {
   }
 
   private persist(): void {
-    this.saving = this.saving.then(async () => {
+    this.saving = this.saving
+      .then(async () => {
+        await fs.mkdir(path.dirname(config.stateFile), { recursive: true });
+        const tmp = `${config.stateFile}.tmp`;
+        await fs.writeFile(tmp, JSON.stringify(this.state), { mode: 0o600 });
+        await fs.rename(tmp, config.stateFile);
+      })
+      .catch((err: unknown) => {
+        // Får aldrig krascha processen – då tappas klienter/tokens i minnet och inloggningen bryts.
+        console.error(`[oauth] kunde inte spara ${config.stateFile}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  }
+
+  /** Kontrollerar vid start att state-filen går att skriva, så felet syns i loggen direkt. */
+  async checkWritable(): Promise<boolean> {
+    try {
       await fs.mkdir(path.dirname(config.stateFile), { recursive: true });
-      const tmp = `${config.stateFile}.tmp`;
-      await fs.writeFile(tmp, JSON.stringify(this.state), { mode: 0o600 });
-      await fs.rename(tmp, config.stateFile);
-    });
+      await fs.access(path.dirname(config.stateFile), fs.constants.W_OK);
+      return true;
+    } catch {
+      console.error(`[oauth] VARNING: ${path.dirname(config.stateFile)} är inte skrivbar – OAuth-klienter och tokens överlever inte en omstart. Kör: chown -R 10001:10001 <data-mappen>`);
+      return false;
+    }
   }
 
   private gc(): void {

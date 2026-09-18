@@ -3,7 +3,7 @@
 
 mcp.necom.se {
 	encode gzip
-	reverse_proxy 127.0.0.1:3010 {
+	reverse_proxy 127.0.0.1:3006 {
 		# SSE/streaming: stäng av buffring och låt långa svar leva
 		flush_interval -1
 		transport http {
