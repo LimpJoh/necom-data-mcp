@@ -1,0 +1,19 @@
+# Deployas via Hostinger VPS Docker-projekt (hPanel/API) eller `docker compose up -d`.
+# Hemligheter läses från /opt/necom-data-mcp/.env och /opt/necom-data-mcp/data/ på värden – de ligger aldrig i repot.
+services:
+  necom-data-mcp:
+    build: .
+    image: necom-data-mcp:latest
+    container_name: necom-data-mcp
+    restart: unless-stopped
+    env_file:
+      - /opt/necom-data-mcp/.env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3010"
+      MCP_STATE_FILE: /app/data/oauth-state.json
+      GOOGLE_APPLICATION_CREDENTIALS: /app/data/ga4-service-account.json
+    volumes:
+      - /opt/necom-data-mcp/data:/app/data
+    ports:
+      - "127.0.0.1:3010:3010"

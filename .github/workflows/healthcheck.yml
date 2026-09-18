@@ -1,0 +1,41 @@
+name: Hälsokoll
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kontrollera /health och OAuth-metadata
+        id: probe
+        run: |
+          URL="${{ vars.PUBLIC_URL || 'https://mcp.necom.se' }}"
+          ok=1
+          curl -fsS --max-time 20 "$URL/health" | tee health.json || ok=0
+          curl -fsS --max-time 20 "$URL/.well-known/oauth-authorization-server" >/dev/null || ok=0
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+      - name: Öppna issue vid fel (om inget öppet finns)
+        if: steps.probe.outputs.ok == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'health' });
+            if (issues.length === 0) {
+              await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title: `Servern svarar inte (${new Date().toISOString()})`, labels: ['health'], body: 'Hälsokollen misslyckades mot /health eller OAuth-metadata. Kolla `pm2 logs necom-data-mcp` och Caddy.' });
+            }
+      - name: Stäng health-issues när allt är grönt
+        if: steps.probe.outputs.ok == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({ owner: context.repo.owner, repo: context.repo.repo, state: 'open', labels: 'health' });
+            for (const i of issues) {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, body: 'Servern svarar igen – stänger.' });
+              await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: i.number, state: 'closed' });
+            }
