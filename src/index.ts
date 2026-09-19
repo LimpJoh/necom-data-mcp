@@ -8,6 +8,7 @@ import { config } from './config.js';
 import { brands } from './brands.js';
 import { OwnerOAuthProvider } from './auth/provider.js';
 import { registerWooTools } from './woo/tools.js';
+import { registerWooProductTools } from './woo/products.js';
 import { registerGa4Tools, ga4Configured } from './ga4/tools.js';
 import { registerGscTools } from './gsc/tools.js';
 import { registerDogshowproTools } from './dogshowpro/tools.js';
@@ -20,7 +21,7 @@ import { loadStore } from './store.js';
 
 function buildServer(): McpServer {
   const server = new McpServer(
-    { name: 'necom-data', version: '1.2.0' },
+    { name: 'necom-data', version: '1.3.0' },
     {
       instructions:
         'NeCom butiksdata och ops. Börja med brand_list (varumärken, Meta-ID:n, marginal). sales_summary/mer_summary fungerar för alla varumärken; woo_* för WooCommerce-detaljer, supabase_sales_breakdown för egna plattformar, ga4_*, gsc_*, stripe_*/mollie_* för respektive källa. ' +
@@ -30,6 +31,7 @@ function buildServer(): McpServer {
   );
   registerSalesTools(server);
   registerWooTools(server);
+  registerWooProductTools(server);
   registerGa4Tools(server);
   registerGscTools(server);
   registerDogshowproTools(server);
@@ -77,7 +79,7 @@ async function main(): Promise<void> {
   app.get('/health', (_req, res) =>
     res.json({
       ok: true,
-      version: '1.2.0',
+      version: '1.3.0',
       brands: brands().map((b) => ({ key: b.key, platform: b.platform, sales: Boolean(b.woo || b.supabase), ga4: Boolean(b.ga4Property), gsc: Boolean(b.gscSite), meta: Boolean(b.metaAccount) })),
       ga4: ga4Configured(),
       stripe: Boolean(config.stripeSecretKey),
@@ -116,7 +118,7 @@ async function main(): Promise<void> {
 
   const host = process.env.HOST ?? '127.0.0.1';
   app.listen(config.port, host, () => {
-    console.log(`necom-data-mcp 1.2.0 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
+    console.log(`necom-data-mcp 1.3.0 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
     console.log(`Varumärken: ${brands().map((b) => `${b.key}(${b.platform})`).join(', ') || '(inga)'} | GA4/GSC: ${config.ga4Credentials ? 'ja' : 'nej'} | Stripe: ${config.stripeSecretKey ? 'ja' : 'nej'} | Mollie: ${config.mollieAccessToken ? 'ja' : 'nej'} | Ops: ${config.ops.enabled ? 'PÅ' : 'av'}`);
   });
 }

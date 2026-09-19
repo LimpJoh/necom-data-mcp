@@ -128,6 +128,7 @@ function brandForm(b: Partial<StoredBrand>, csrf: string, isNew: boolean): strin
 <div><label>Stripe Connect-konto (valfritt)</label><input name="stripe_account" value="${v('stripe_account')}" placeholder="acct_…"></div>
 <div><label>Mollie-profil (valfritt)</label><input name="mollie_profile" value="${v('mollie_profile')}" placeholder="pfl_…"></div>
 <div><label>Etsy shop-ID (valfritt)</label><input name="etsy_shop_id" value="${v('etsy_shop_id')}"></div></div>
+<label><input type="checkbox" name="allow_writes" value="1" ${b.allow_writes ? 'checked' : ''} style="width:auto;margin-right:.5rem">Tillåt produktändringar via Claude (woo_products_update – varje ändring kräver ditt ja i chatten och loggas)</label>
 <label>Anteckningar</label><textarea name="notes">${v('notes')}</textarea>
 <button type="submit">Spara</button> <a class="btn sec" href="/admin/brands">Avbryt</a></div></form>`;
 }
@@ -302,6 +303,7 @@ ${b.checks.map((c) => `<div class="chk"><span class="dot ${statusClass(c.status)
       stripe_account: f.stripe_account?.trim() || undefined,
       mollie_profile: f.mollie_profile?.trim() || undefined,
       etsy_shop_id: f.etsy_shop_id?.trim() || undefined,
+      allow_writes: f.allow_writes === '1',
       notes: f.notes?.trim() || undefined,
     };
     // Om varumärket bara finns i .env och lösenordsfält lämnats tomma: ta med .env-värdena

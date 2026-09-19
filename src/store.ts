@@ -27,6 +27,7 @@ export interface StoredBrand {
   stripe_account?: string;
   mollie_profile?: string;
   etsy_shop_id?: string;
+  allow_writes?: boolean;
   notes?: string;
   updated_at?: string;
 }

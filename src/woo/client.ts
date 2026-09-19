@@ -47,6 +47,28 @@ export class WooClient {
     };
   }
 
+  private async send<T>(method: 'POST' | 'PUT', namespace: 'wc/v3' | 'wc-analytics', endpoint: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.store.url}/wp-json/${namespace}/${endpoint}`, {
+      method,
+      headers: { Authorization: this.authHeader, Accept: 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'necom-data-mcp/1.0' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`${this.store.name}: ${res.status} ${res.statusText} på ${method} ${namespace}/${endpoint} – ${text.slice(0, 300)}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  post<T>(namespace: 'wc/v3' | 'wc-analytics', endpoint: string, body: unknown): Promise<T> {
+    return this.send<T>('POST', namespace, endpoint, body);
+  }
+
+  put<T = unknown>(namespace: 'wc/v3' | 'wc-analytics', endpoint: string, body: unknown): Promise<T> {
+    return this.send<T>('PUT', namespace, endpoint, body);
+  }
+
   /** Hämtar alla ordrar i ett datumintervall (skapade), paginerat. maxOrders skyddar mot jättebutiker. */
   async orders(since: string, until: string, statuses: string[], maxOrders = 2000): Promise<WooOrder[]> {
     const out: WooOrder[] = [];

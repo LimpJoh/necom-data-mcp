@@ -22,6 +22,14 @@ Egenutvecklade butiker exponerar vyn `v_sales` (mall i `sql/v_sales.sql`) – sa
 | Betalning | `stripe_payments_summary`, `mollie_payments_summary` |
 | Dogshowpro | `dogshowpro_sales_summary`, `dogshowpro_upcoming_events` |
 
+## Produktverktyg (WooCommerce, v1.3)
+
+| Verktyg | Gör |
+|---|---|
+| `woo_products_audit` | Revision av produkter + varianter: pris saknas, slut i lager men synlig, GTIN saknas/ogiltig (GS1-kontrollsiffra), otillåten HTML i beskrivning, bild/kategori/SKU saknas. Matchar felen i Metas `ads_catalog_get_diagnostics`. |
+| `woo_product_get` | Full produktinfo via id eller SKU. |
+| `woo_products_update` | **Skrivande.** Batch-rättning (max 100) av pris, lager, GTIN, beskrivning, synlighet, status. Kräver att varumärket har *Tillåt produktändringar* ikryssat i admin (Varumärken → Redigera) **och** `confirm=true` per anrop. Loggas i `data/woo-writes.log`. |
+
 ## Ops-lager (skrivande, av som default)
 
 Sätt `OPS_ENABLED=true` och relevanta `OPS_*`-tokens. Alla skrivande anrop kräver `confirm=true` och loggas i `data/ops-audit.log`.

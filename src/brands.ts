@@ -34,6 +34,7 @@ export interface Brand {
   stripeAccount?: string;
   mollieProfile?: string;
   etsyShopId?: string;
+  allowWrites?: boolean;
 }
 
 const e = (k: string): string | undefined => {
@@ -139,6 +140,7 @@ export function brands(): Brand[] {
       stripeAccount: s.stripe_account || undefined,
       mollieProfile: s.mollie_profile || undefined,
       etsyShopId: s.etsy_shop_id || undefined,
+      allowWrites: Boolean(s.allow_writes),
     };
     if (s.platform === 'woo' && s.url && s.woo_user && s.woo_app_password) b.woo = { user: s.woo_user, appPassword: s.woo_app_password.replace(/\s+/g, '') };
     if (s.platform === 'supabase' && s.supabase_url && s.supabase_service_role_key)
@@ -182,5 +184,6 @@ export function brandCard(b: Brand) {
     stripe_account: b.stripeAccount ?? null,
     mollie_profile: b.mollieProfile ?? null,
     etsy_shop_id: b.etsyShopId ?? null,
+    allow_writes: Boolean(b.allowWrites),
   };
 }
