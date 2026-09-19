@@ -22,7 +22,7 @@ import { loadStore } from './store.js';
 
 function buildServer(): McpServer {
   const server = new McpServer(
-    { name: 'necom-data', version: '1.4.0' },
+    { name: 'necom-data', version: '1.4.1' },
     {
       instructions:
         'NeCom butiksdata, journal och ops. Börja ALLTID med brand_status <brand> (senaste ändring, nästa checkpoint, öppna problem) och brand_list (Meta-ID:n, marginal). Logga varje skrivande åtgärd, beslut och rapport med journal_add. sales_summary/mer_summary fungerar för alla varumärken; woo_* för WooCommerce-detaljer, supabase_sales_breakdown för egna plattformar, ga4_*, gsc_*, stripe_*/mollie_* för respektive källa. ' +
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   app.get('/health', (_req, res) =>
     res.json({
       ok: true,
-      version: '1.4.0',
+      version: '1.4.1',
       brands: brands().map((b) => ({ key: b.key, platform: b.platform, sales: Boolean(b.woo || b.supabase), ga4: Boolean(b.ga4Property), gsc: Boolean(b.gscSite), meta: Boolean(b.metaAccount) })),
       ga4: ga4Configured(),
       stripe: Boolean(config.stripeSecretKey),
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
 
   const host = process.env.HOST ?? '127.0.0.1';
   app.listen(config.port, host, () => {
-    console.log(`necom-data-mcp 1.4.0 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
+    console.log(`necom-data-mcp 1.4.1 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
     console.log(`Varumärken: ${brands().map((b) => `${b.key}(${b.platform})`).join(', ') || '(inga)'} | GA4/GSC: ${config.ga4Credentials ? 'ja' : 'nej'} | Stripe: ${config.stripeSecretKey ? 'ja' : 'nej'} | Mollie: ${config.mollieAccessToken ? 'ja' : 'nej'} | Ops: ${config.ops.enabled ? 'PÅ' : 'av'}`);
   });
 }

@@ -113,6 +113,8 @@ export async function loadStore(): Promise<StoreData> {
   cache.brands ??= [];
   cache.settings ??= {};
   console.log(`[store] ${cache.brands.length} varumärke(n) i registret (${storeFile()})`);
+  // Moduler kan ha läst registret vid import (innan filen lästs) – tvinga omläsning nu.
+  for (const l of listeners) l();
   return cache;
 }
 
@@ -139,6 +141,7 @@ export async function saveStore(data: StoreData): Promise<void> {
   const tmp = `${storeFile()}.tmp`;
   await fs.writeFile(tmp, encrypt(k, JSON.stringify(data)), { mode: 0o600 });
   await fs.rename(tmp, storeFile());
+  console.log(`[store] sparat: varumärken=[${data.brands.map((b) => b.key).join(',')}] inställningar=${Object.keys(data.settings).filter((k) => k !== 'updated_at').length}`);
   for (const l of listeners) l();
 }
 

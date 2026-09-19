@@ -6,7 +6,7 @@ import { resolveRange, round, safeDiv, pct, textResult, errorResult } from '../u
 
 const PAID_STATUSES = ['completed', 'processing'];
 
-const storeParam = z.string().describe(`Butiksnyckel. En av: ${config.stores.map((s) => s.key).join(', ') || '(inga)'}`);
+const storeParam = z.string().describe('Butiksnyckel (se woo_list_stores / brand_list).');
 const sinceParam = z.string().optional().describe('Startdatum YYYY-MM-DD eller relativt, t.ex. "7d", "30d". Default 30d.');
 const untilParam = z.string().optional().describe('Slutdatum YYYY-MM-DD. Default idag.');
 
