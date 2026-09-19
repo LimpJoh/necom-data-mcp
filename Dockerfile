@@ -9,7 +9,8 @@ FROM node:22-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 # Fast UID/GID så att värdens datamapp kan ägas rätt: chown -R 10001:10001 /opt/necom-data-mcp/data
-RUN apk add --no-cache curl && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
+# openssh-client behövs bara för ops_vps_exec (SSH till värden).
+RUN apk add --no-cache curl openssh-client && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

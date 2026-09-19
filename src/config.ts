@@ -1,5 +1,7 @@
 import 'dotenv/config';
+import { brands, type Brand } from './brands.js';
 
+/** Woo-butik i det format Woo-verktygen använder (härlett ur varumärkesregistret). */
 export interface WooStore {
   key: string;
   name: string;
@@ -18,6 +20,12 @@ function env(name: string, fallback?: string): string {
   return v;
 }
 
+function wooStores(): WooStore[] {
+  return brands()
+    .filter((b): b is Brand & { woo: NonNullable<Brand['woo']>; url: string } => Boolean(b.woo && b.url))
+    .map((b) => ({ key: b.key, name: b.name, url: b.url, user: b.woo.user, appPassword: b.woo.appPassword, ga4Property: b.ga4Property }));
+}
+
 export const config = {
   port: Number(env('PORT', '3010')),
   publicUrl: env('PUBLIC_URL', 'http://localhost:3010').replace(/\/$/, ''),
@@ -25,41 +33,32 @@ export const config = {
   stateFile: env('MCP_STATE_FILE', './data/oauth-state.json'),
   accessTokenTtl: Number(env('MCP_ACCESS_TOKEN_TTL', '3600')),
   ga4Credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS ?? '',
-  ga4Extra: parseGa4Extra(process.env.GA4_EXTRA_PROPERTIES ?? ''),
+  ga4Extra: parseKv(process.env.GA4_EXTRA_PROPERTIES ?? ''),
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? '',
+  mollieAccessToken: process.env.MOLLIE_ACCESS_TOKEN ?? '',
   dogshowpro: {
-    url: process.env.DOGSHOWPRO_SUPABASE_URL ?? '',
-    serviceRoleKey: process.env.DOGSHOWPRO_SUPABASE_SERVICE_ROLE_KEY ?? '',
+    url: process.env.DOGSHOWPRO_SUPABASE_URL ?? brands().find((b) => b.key === 'dogshowpro')?.supabase?.url ?? '',
+    serviceRoleKey: process.env.DOGSHOWPRO_SUPABASE_SERVICE_ROLE_KEY ?? brands().find((b) => b.key === 'dogshowpro')?.supabase?.serviceRoleKey ?? '',
   },
-  stores: loadStores(),
+  ops: {
+    enabled: (process.env.OPS_ENABLED ?? 'false').toLowerCase() === 'true',
+    githubToken: process.env.OPS_GITHUB_TOKEN ?? '',
+    githubOwner: process.env.OPS_GITHUB_OWNER ?? '',
+    supabaseAccessToken: process.env.OPS_SUPABASE_ACCESS_TOKEN ?? '',
+    supabaseOrgId: process.env.OPS_SUPABASE_ORG_ID ?? '',
+    hostingerToken: process.env.OPS_HOSTINGER_TOKEN ?? '',
+    vpsIp: process.env.OPS_VPS_IP ?? '',
+    sshHost: process.env.OPS_SSH_HOST ?? 'host.docker.internal',
+    sshUser: process.env.OPS_SSH_USER ?? 'deploy',
+    sshKeyFile: process.env.OPS_SSH_KEY_FILE ?? '/app/data/ops_ssh_key',
+    auditLog: process.env.OPS_AUDIT_LOG ?? './data/ops-audit.log',
+  },
+  get stores(): WooStore[] {
+    return wooStores();
+  },
 };
 
-function loadStores(): WooStore[] {
-  const keys = (process.env.WOO_STORES ?? '')
-    .split(',')
-    .map((k) => k.trim())
-    .filter(Boolean);
-  const stores: WooStore[] = [];
-  for (const key of keys) {
-    const user = process.env[`WOO_${key}_USER`] ?? '';
-    const appPassword = process.env[`WOO_${key}_APP_PASSWORD`] ?? '';
-    const url = (process.env[`WOO_${key}_URL`] ?? '').replace(/\/$/, '');
-    if (!url || !user || !appPassword) {
-      console.warn(`[config] Butik "${key}" hoppas över – URL/USER/APP_PASSWORD saknas.`);
-      continue;
-    }
-    stores.push({
-      key,
-      name: process.env[`WOO_${key}_NAME`] ?? key,
-      url,
-      user,
-      appPassword: appPassword.replace(/\s+/g, ''),
-      ga4Property: process.env[`WOO_${key}_GA4_PROPERTY`] || undefined,
-    });
-  }
-  return stores;
-}
-
-function parseGa4Extra(raw: string): Record<string, string> {
+function parseKv(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const pair of raw.split(',')) {
     const [k, v] = pair.split('=').map((s) => s?.trim());
@@ -68,19 +67,17 @@ function parseGa4Extra(raw: string): Record<string, string> {
   return out;
 }
 
-/** Alla GA4-properties: butiksnyckel -> propertyId, plus extra. */
+/** Alla GA4-properties: varumärkesnyckel -> propertyId, plus extra. */
 export function ga4Properties(): Record<string, string> {
   const out: Record<string, string> = { ...config.ga4Extra };
-  for (const s of config.stores) if (s.ga4Property) out[s.key] = s.ga4Property;
+  for (const b of brands()) if (b.ga4Property) out[b.key] = b.ga4Property;
   return out;
 }
 
 export function getStore(key: string): WooStore {
   const s = config.stores.find((x) => x.key === key);
   if (!s) {
-    throw new Error(
-      `Okänd butik "${key}". Tillgängliga: ${config.stores.map((x) => x.key).join(', ') || '(inga konfigurerade)'}`,
-    );
+    throw new Error(`Okänd Woo-butik "${key}". Tillgängliga: ${config.stores.map((x) => x.key).join(', ') || '(inga konfigurerade)'}`);
   }
   return s;
 }

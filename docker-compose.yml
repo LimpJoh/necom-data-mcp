@@ -1,4 +1,4 @@
-# Deployas via Hostinger VPS Docker-projekt (hPanel/API) eller `docker compose up -d`.
+# Körs på VPS:en: cd /opt/necom-data-mcp/app && docker compose up -d --build
 # Hemligheter läses från /opt/necom-data-mcp/.env och /opt/necom-data-mcp/data/ på värden – de ligger aldrig i repot.
 services:
   necom-data-mcp:
@@ -13,6 +13,11 @@ services:
       PORT: "3010"
       MCP_STATE_FILE: /app/data/oauth-state.json
       GOOGLE_APPLICATION_CREDENTIALS: /app/data/ga4-service-account.json
+      OPS_AUDIT_LOG: /app/data/ops-audit.log
+      OPS_SSH_KEY_FILE: /app/data/ops_ssh_key
+      OPS_SSH_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # låter ops_vps_exec nå värden via SSH
     volumes:
       - /opt/necom-data-mcp/data:/app/data
     ports:
