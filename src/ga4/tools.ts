@@ -1,12 +1,20 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
+import { existsSync } from 'node:fs';
 import { config, ga4Properties } from '../config.js';
+import { listeners } from '../store.js';
 import { resolveRange, round, safeDiv, pct, textResult, errorResult } from '../util.js';
 
 let client: BetaAnalyticsDataClient | null = null;
+listeners.push(() => {
+  client = null;
+});
+export function ga4Configured(): boolean {
+  return Boolean(config.ga4Credentials) && existsSync(config.ga4Credentials);
+}
 function ga(): BetaAnalyticsDataClient {
-  if (!config.ga4Credentials) throw new Error('GA4 är inte konfigurerat (GOOGLE_APPLICATION_CREDENTIALS saknas).');
+  if (!ga4Configured()) throw new Error('GA4 är inte konfigurerat – ladda upp servicekontots JSON i admin (Inställningar).');
   if (!client) client = new BetaAnalyticsDataClient({ keyFilename: config.ga4Credentials });
   return client;
 }
@@ -22,7 +30,7 @@ const propertyParam = z.string().describe('Butiksnyckel (t.ex. "outlets", "dogsh
 const sinceParam = z.string().optional().describe('Startdatum YYYY-MM-DD eller relativt ("7d", "30d"). Default 30d.');
 const untilParam = z.string().optional().describe('Slutdatum YYYY-MM-DD. Default idag.');
 
-async function runReport(property: string, since: string, until: string, dimensions: string[], metrics: string[], limit = 50, orderByMetric?: string) {
+export async function runReport(property: string, since: string, until: string, dimensions: string[], metrics: string[], limit = 50, orderByMetric?: string) {
   const [res] = await ga().runReport({
     property: propertyId(property),
     dateRanges: [{ startDate: since, endDate: until }],

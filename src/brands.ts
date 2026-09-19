@@ -13,6 +13,8 @@
  * Bakåtkompatibelt: WOO_STORES + WOO_<key>_* läses också och blir varumärken med platform=woo.
  */
 
+import { storeSync, listeners } from './store.js';
+
 export type Platform = 'woo' | 'supabase' | 'none';
 
 export interface Brand {
@@ -120,9 +122,39 @@ export function brands(): Brand[] {
     });
   }
 
+  // Admin-gränssnittets register (data/store.enc) vinner över .env för samma nyckel.
+  for (const s of storeSync().brands) {
+    const b: Brand = {
+      key: s.key,
+      name: s.name || s.key,
+      platform: s.platform,
+      url: s.url?.replace(/\/$/, ''),
+      ga4Property: s.ga4_property || undefined,
+      gscSite: s.gsc_site || undefined,
+      metaAccount: s.meta_account || undefined,
+      metaPixel: s.meta_pixel || undefined,
+      metaCatalog: s.meta_catalog || undefined,
+      grossMarginPct: s.gross_margin_pct ?? undefined,
+      targetMer: s.target_mer ?? undefined,
+      stripeAccount: s.stripe_account || undefined,
+      mollieProfile: s.mollie_profile || undefined,
+      etsyShopId: s.etsy_shop_id || undefined,
+    };
+    if (s.platform === 'woo' && s.url && s.woo_user && s.woo_app_password) b.woo = { user: s.woo_user, appPassword: s.woo_app_password.replace(/\s+/g, '') };
+    if (s.platform === 'supabase' && s.supabase_url && s.supabase_service_role_key)
+      b.supabase = { url: s.supabase_url, serviceRoleKey: s.supabase_service_role_key, salesView: s.sales_view || 'v_sales' };
+    out.set(s.key, b);
+  }
+
   cache = [...out.values()];
   return cache;
 }
+
+/** Anropas när registret ändrats via admin. */
+export function invalidateBrands(): void {
+  cache = null;
+}
+listeners.push(invalidateBrands);
 
 export function getBrand(key: string): Brand {
   const b = brands().find((x) => x.key === key);

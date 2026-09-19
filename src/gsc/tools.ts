@@ -5,13 +5,21 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { GoogleAuth } from 'google-auth-library';
+import { existsSync } from 'node:fs';
 import { config } from '../config.js';
+import { listeners } from '../store.js';
 import { brands, getBrand } from '../brands.js';
 import { resolveRange, round, pct, textResult, errorResult } from '../util.js';
 
 let auth: GoogleAuth | null = null;
+listeners.push(() => {
+  auth = null;
+});
+export function gscConfigured(): boolean {
+  return Boolean(config.ga4Credentials) && existsSync(config.ga4Credentials);
+}
 function gauth(): GoogleAuth {
-  if (!config.ga4Credentials) throw new Error('Search Console är inte konfigurerat (GOOGLE_APPLICATION_CREDENTIALS saknas).');
+  if (!gscConfigured()) throw new Error('Search Console är inte konfigurerat – ladda upp servicekontots JSON i admin (Inställningar).');
   if (!auth) auth = new GoogleAuth({ keyFilename: config.ga4Credentials, scopes: ['https://www.googleapis.com/auth/webmasters.readonly'] });
   return auth;
 }
@@ -31,7 +39,7 @@ interface GscRow {
   position: number;
 }
 
-async function query(site: string, body: Record<string, unknown>): Promise<GscRow[]> {
+export async function gscQuery(site: string, body: Record<string, unknown>): Promise<GscRow[]> {
   const client = await gauth().getClient();
   const url = `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(site)}/searchAnalytics/query`;
   const res = await client.request<{ rows?: GscRow[] }>({ url, method: 'POST', data: body });
@@ -73,7 +81,7 @@ export function registerGscTools(server: McpServer): void {
         if (filter_contains && (dim === 'query' || dim === 'page')) {
           body.dimensionFilterGroups = [{ filters: [{ dimension: dim, operator: 'contains', expression: filter_contains }] }];
         }
-        const [rows, totals] = await Promise.all([query(site, body), query(site, { startDate: r.since, endDate: r.until, dataState: 'all' })]);
+        const [rows, totals] = await Promise.all([gscQuery(site, body), gscQuery(site, { startDate: r.since, endDate: r.until, dataState: 'all' })]);
         const t = totals[0];
         const out = rows.map((x) => ({ [dim]: x.keys[0], clicks: x.clicks, impressions: x.impressions, ctr_pct: round(x.ctr * 100), position: round(x.position, 1) }));
         if (dim === 'date') out.sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -100,7 +108,7 @@ export function registerGscTools(server: McpServer): void {
       try {
         const site = siteFor(brand);
         const r = resolveRange(since ?? '28d', until);
-        const rows = await query(site, { startDate: r.since, endDate: r.until, dimensions: ['query', 'date'], rowLimit: 25000, dataState: 'all' });
+        const rows = await gscQuery(site, { startDate: r.since, endDate: r.until, dimensions: ['query', 'date'], rowLimit: 25000, dataState: 'all' });
         const terms = brand_terms.map((t) => t.toLowerCase());
         const byDate = new Map<string, { brand: number; generic: number }>();
         let brandClicks = 0;

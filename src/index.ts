@@ -8,17 +8,19 @@ import { config } from './config.js';
 import { brands } from './brands.js';
 import { OwnerOAuthProvider } from './auth/provider.js';
 import { registerWooTools } from './woo/tools.js';
-import { registerGa4Tools } from './ga4/tools.js';
+import { registerGa4Tools, ga4Configured } from './ga4/tools.js';
 import { registerGscTools } from './gsc/tools.js';
 import { registerDogshowproTools } from './dogshowpro/tools.js';
 import { registerPaymentTools } from './payments/tools.js';
 import { registerSalesTools } from './sales/tools.js';
 import { registerMerTools } from './mer.js';
 import { registerOpsTools } from './ops/tools.js';
+import { adminRouter } from './admin/router.js';
+import { loadStore } from './store.js';
 
 function buildServer(): McpServer {
   const server = new McpServer(
-    { name: 'necom-data', version: '1.1.0' },
+    { name: 'necom-data', version: '1.2.0' },
     {
       instructions:
         'NeCom butiksdata och ops. Börja med brand_list (varumärken, Meta-ID:n, marginal). sales_summary/mer_summary fungerar för alla varumärken; woo_* för WooCommerce-detaljer, supabase_sales_breakdown för egna plattformar, ga4_*, gsc_*, stripe_*/mollie_* för respektive källa. ' +
@@ -38,6 +40,7 @@ function buildServer(): McpServer {
 }
 
 async function main(): Promise<void> {
+  await loadStore();
   const provider = new OwnerOAuthProvider();
   await provider.init();
   await provider.checkWritable();
@@ -69,13 +72,14 @@ async function main(): Promise<void> {
     return res.status(out.status).type('html').send(out.html);
   });
 
-  app.get('/', (_req, res) => res.type('text').send('NeCom Data MCP – endpoint: /mcp'));
+  app.use('/admin', adminRouter());
+  app.get('/', (_req, res) => res.redirect('/admin'));
   app.get('/health', (_req, res) =>
     res.json({
       ok: true,
-      version: '1.1.0',
+      version: '1.2.0',
       brands: brands().map((b) => ({ key: b.key, platform: b.platform, sales: Boolean(b.woo || b.supabase), ga4: Boolean(b.ga4Property), gsc: Boolean(b.gscSite), meta: Boolean(b.metaAccount) })),
-      ga4: Boolean(config.ga4Credentials),
+      ga4: ga4Configured(),
       stripe: Boolean(config.stripeSecretKey),
       mollie: Boolean(config.mollieAccessToken),
       ops: config.ops.enabled,
@@ -112,7 +116,7 @@ async function main(): Promise<void> {
 
   const host = process.env.HOST ?? '127.0.0.1';
   app.listen(config.port, host, () => {
-    console.log(`necom-data-mcp 1.1.0 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
+    console.log(`necom-data-mcp 1.2.0 lyssnar på ${host}:${config.port} – publik URL ${config.publicUrl}/mcp`);
     console.log(`Varumärken: ${brands().map((b) => `${b.key}(${b.platform})`).join(', ') || '(inga)'} | GA4/GSC: ${config.ga4Credentials ? 'ja' : 'nej'} | Stripe: ${config.stripeSecretKey ? 'ja' : 'nej'} | Mollie: ${config.mollieAccessToken ? 'ja' : 'nej'} | Ops: ${config.ops.enabled ? 'PÅ' : 'av'}`);
   });
 }
