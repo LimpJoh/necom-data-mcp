@@ -89,15 +89,43 @@ function decrypt(k: Buffer, b64: string): string {
 
 export async function loadStore(): Promise<StoreData> {
   if (cache) return cache;
-  const k = await loadKey();
+  let raw: string | null = null;
   try {
-    cache = JSON.parse(decrypt(k, await fs.readFile(storeFile(), 'utf8'))) as StoreData;
-  } catch {
+    raw = await fs.readFile(storeFile(), 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new Error(`Kan inte läsa ${storeFile()}: ${(e as Error).message}`);
+  }
+  // Ett befintligt register som inte går att läsa får ALDRIG skrivas över tyst – kontrollera nyckeln innan loadKey() kan skapa en ny.
+  if (raw !== null) {
+    const keyExists = await fs.access(keyFile()).then(() => true).catch(() => false);
+    if (!keyExists) throw new Error(`${storeFile()} finns men ${keyFile()} saknas/oläsbar – vägrar starta med tomt register. Återställ store.key.`);
+  }
+  const k = await loadKey();
+  if (raw === null) {
     cache = { brands: [], settings: {} };
+  } else {
+    try {
+      cache = JSON.parse(decrypt(k, raw)) as StoreData;
+    } catch (e) {
+      throw new Error(`${storeFile()} kunde inte dekrypteras (${(e as Error).message}). Vägrar starta så att registret inte skrivs över. Kontrollera store.key / återställ från store.enc.bak-*.`);
+    }
   }
   cache.brands ??= [];
   cache.settings ??= {};
+  console.log(`[store] ${cache.brands.length} varumärke(n) i registret (${storeFile()})`);
   return cache;
+}
+
+/** Daterad backup av registret; behåller de 10 senaste. */
+async function backupStore(): Promise<void> {
+  const src = storeFile();
+  const exists = await fs.access(src).then(() => true).catch(() => false);
+  if (!exists) return;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  await fs.copyFile(src, `${src}.bak-${stamp}`);
+  const dir = path.dirname(src);
+  const baks = (await fs.readdir(dir)).filter((f) => f.startsWith('store.enc.bak-')).sort();
+  for (const old of baks.slice(0, Math.max(0, baks.length - 10))) await fs.unlink(path.join(dir, old)).catch(() => undefined);
 }
 
 export function storeSync(): StoreData {
@@ -106,6 +134,7 @@ export function storeSync(): StoreData {
 
 export async function saveStore(data: StoreData): Promise<void> {
   const k = await loadKey();
+  await backupStore();
   cache = data;
   const tmp = `${storeFile()}.tmp`;
   await fs.writeFile(tmp, encrypt(k, JSON.stringify(data)), { mode: 0o600 });
