@@ -22,6 +22,18 @@ Egenutvecklade butiker exponerar vyn `v_sales` (mall i `sql/v_sales.sql`) – sa
 | Betalning | `stripe_payments_summary`, `mollie_payments_summary` |
 | Dogshowpro | `dogshowpro_sales_summary`, `dogshowpro_upcoming_events` |
 
+## Journal (v1.4)
+
+En fil per varumärke i `data/journal/<brand>.jsonl` (+ `platform` för MCP/infra). Alla chattar, projekt och schemalagda rapporter delar den. Synlig och redigerbar under Admin → Journal.
+
+| Verktyg | Gör |
+|---|---|
+| `brand_status` | **Anropa först.** Senaste ändring (dagar sedan), senaste rapport, nästa checkpoint, öppna problem, senaste poster + råd om det är för tätt inpå förra ändringen. |
+| `journal_add` | Logga change / decision / report / checkpoint / issue / note / deploy med refs (id:n), metrics och `next_check`. Woo-produktändringar och ops-skrivningar loggas automatiskt. |
+| `journal_list` | Filtrera på varumärke, typ, datum, fritext, bara öppna. |
+| `journal_resolve` | Markera issue/checkpoint som löst. |
+| `journal_overview` | En rad per varumärke – start för veckoanalysen. |
+
 ## Produktverktyg (WooCommerce, v1.3)
 
 | Verktyg | Gör |

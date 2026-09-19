@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { brands, brandCard } from '../brands.js';
 import { loadStore, upsertBrand, deleteBrand, updateSettings, storeSync, type StoredBrand } from '../store.js';
 import { checkAll, checkBrand, serviceAccountEmail } from './health.js';
+import { readJournal, appendJournal, brandStatus, ENTRY_TYPES, type EntryType } from '../journal.js';
 
 interface Session {
   csrf: string;
@@ -77,6 +78,7 @@ function page(title: string, body: string, active = '', flash?: { ok?: string; e
   const nav = [
     ['/admin', 'Översikt'],
     ['/admin/brands', 'Varumärken'],
+    ['/admin/journal', 'Journal'],
     ['/admin/settings', 'Inställningar'],
     ['/admin/connect', 'Koppla Claude'],
   ]
@@ -115,7 +117,7 @@ function brandForm(b: Partial<StoredBrand>, csrf: string, isNew: boolean): strin
 <div class="card"><h2>Google</h2><div class="two">
 <div><label>GA4 property-ID (siffror)</label><input name="ga4_property" value="${v('ga4_property')}" placeholder="123456789"></div>
 <div><label>Search Console-sajt</label><input name="gsc_site" value="${v('gsc_site')}" placeholder="sc-domain:presentfabriken.com"></div></div>
-<p class="small muted">Servicekontot ${esc(serviceAccountEmail() ?? '(ladda upp JSON under Inställningar)')} ska vara Läsare på GA4-propertyn och användare i Search Console.</p></div>
+<p class="small muted">Servicekontot ${esc(serviceAccountEmail() ?? '(ladda upp JSON under Inställningar)')} ska vara Redigerare på GA4-propertyn och ha Fullständig behörighet i Search Console.</p></div>
 
 <div class="card"><h2>Meta</h2><div class="two">
 <div><label>Annonskonto-ID</label><input name="meta_account" value="${v('meta_account')}"></div>
@@ -416,6 +418,56 @@ ${b.checks.map((c) => `<div class="chk"><span class="dot ${statusClass(c.status)
         '/admin/connect',
       ),
     );
+  });
+
+  // ---------- Journal ----------
+  r.get('/journal', async (req, res) => {
+    await loadStore();
+    const s = (req as unknown as { session: Session }).session;
+    const brand = typeof req.query.brand === 'string' ? req.query.brand : '';
+    const type = typeof req.query.type === 'string' ? req.query.type : '';
+    let all = await readJournal(brand || undefined);
+    if (type) all = all.filter((e) => e.type === type);
+    all.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+    const keys = ['platform', ...brands().map((b) => b.key)];
+    const overview = await Promise.all(keys.map(async (k) => ({ k, s: await brandStatus(k, 1) })));
+    const ov = overview
+      .map(({ k, s: st }) => `<tr><td><a href="/admin/journal?brand=${esc(k)}"><b>${esc(k)}</b></a></td><td class="small">${st.last_change ? `${esc(st.last_change.title)} <span class="muted">(${st.last_change.days_ago} d sedan)</span>` : '<span class="muted">–</span>'}</td><td class="small">${st.next_check ? `<span style="color:${st.next_check_due ? 'var(--warn)' : 'inherit'}">${esc(st.next_check)}</span>` : '<span class="muted">–</span>'}</td><td class="small">${st.open_issues.length || '<span class="muted">0</span>'}</td></tr>`)
+      .join('');
+    const rows = all
+      .slice(0, 200)
+      .map(
+        (e) => `<tr><td class="small muted" style="white-space:nowrap">${esc(e.ts.replace('T', ' ').slice(0, 16))}</td><td class="small">${esc(e.brand)}</td><td><code>${esc(e.type)}</code>${e.resolved ? ' <span class="muted small">löst</span>' : ''}</td><td><b>${esc(e.title)}</b>${e.detail ? `<br><span class="small muted">${esc(e.detail).slice(0, 600)}</span>` : ''}${e.metrics ? `<br><span class="small">${esc(Object.entries(e.metrics).map(([k, v]) => `${k}=${v}`).join(' · '))}</span>` : ''}${e.next_check ? `<br><span class="small" style="color:var(--warn)">checkpoint ${esc(e.next_check)}</span>` : ''}<br><span class="small muted">${esc(e.source ?? '')} · ${esc(e.id)}</span></td></tr>`,
+      )
+      .join('');
+    const opts = (cur: string, list: readonly string[]) => list.map((x) => `<option value="${esc(x)}" ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    res.type('html').send(
+      page(
+        'Journal',
+        `<h1>Journal</h1>
+<div class="card"><h2>Läge per varumärke</h2><table><thead><tr><th>Varumärke</th><th>Senaste ändring</th><th>Nästa checkpoint</th><th>Öppna problem</th></tr></thead><tbody>${ov}</tbody></table></div>
+<div class="card"><h2>Ny post</h2><form method="post" action="/admin/journal/add"><input type="hidden" name="_csrf" value="${s.csrf}"><div class="two">
+<div><label>Varumärke</label><select name="brand">${opts(brand, keys)}</select></div>
+<div><label>Typ</label><select name="type">${opts('note', ENTRY_TYPES)}</select></div>
+<div><label>Rubrik</label><input name="title" required maxlength="200"></div>
+<div><label>Checkpoint (datum, valfritt)</label><input name="next_check" type="date"></div></div>
+<label>Detaljer</label><textarea name="detail" style="min-height:70px"></textarea><button>Spara post</button></form></div>
+<div class="card"><form method="get" class="row"><div style="flex:1"><label>Varumärke</label><select name="brand"><option value="">alla</option>${opts(brand, keys)}</select></div><div style="flex:1"><label>Typ</label><select name="type"><option value="">alla</option>${opts(type, ENTRY_TYPES)}</select></div><div><button class="btn sec" style="margin-top:1.6rem">Filtrera</button></div></form>
+<table><thead><tr><th>När</th><th>Varumärke</th><th>Typ</th><th>Post</th></tr></thead><tbody>${rows || '<tr><td colspan="4" class="muted">Inga poster än. Claude loggar automatiskt vid ändringar, beslut och rapporter.</td></tr>'}</tbody></table>
+<p class="small muted">Visar ${Math.min(all.length, 200)} av ${all.length}. En fil per varumärke: <code>data/journal/&lt;brand&gt;.jsonl</code>.</p></div>`,
+        '/admin/journal',
+        req.query.ok ? { ok: String(req.query.ok) } : undefined,
+      ),
+    );
+  });
+
+  r.post('/journal/add', async (req, res) => {
+    if (!csrfOk(req)) return res.status(403).send('CSRF');
+    const f = req.body as Record<string, string>;
+    const type = (ENTRY_TYPES as readonly string[]).includes(f.type) ? (f.type as EntryType) : 'note';
+    if (!f.title?.trim()) return res.redirect('/admin/journal');
+    await appendJournal({ brand: f.brand || 'platform', type, title: f.title.trim().slice(0, 200), detail: f.detail?.trim() || undefined, next_check: /^\d{4}-\d{2}-\d{2}$/.test(f.next_check ?? '') ? f.next_check : undefined, source: 'admin' });
+    return res.redirect('/admin/journal?ok=Post+sparad');
   });
 
   return r;

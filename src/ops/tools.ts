@@ -15,12 +15,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { config } from '../config.js';
 import { brands, brandCard } from '../brands.js';
 import { textResult, errorResult } from '../util.js';
+import { appendJournal } from '../journal.js';
 
 const ops = config.ops;
 
 async function audit(action: string, detail: unknown): Promise<void> {
   const line = JSON.stringify({ ts: new Date().toISOString(), action, detail }) + '\n';
   await fs.appendFile(ops.auditLog, line).catch(() => undefined);
+  await appendJournal({ brand: 'platform', type: action === 'vps_exec' || action === 'caddy_add_site' ? 'deploy' : 'change', title: `ops: ${action}`, detail: JSON.stringify(detail).slice(0, 4000), source: `ops_${action}` }).catch(() => undefined);
 }
 
 function needConfirm(confirm: boolean | undefined, what: string): void {

@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { getBrand, type Brand } from '../brands.js';
 import { WooClient } from './client.js';
 import { textResult, errorResult } from '../util.js';
+import { appendJournal } from '../journal.js';
 
 interface WooProduct {
   id: number;
@@ -209,6 +210,8 @@ export function registerWooProductTools(server: McpServer): void {
           }
         }
         await audit(b.key, 'products_update', { updates, results });
+        const okN = results.filter((r) => r.ok).length;
+        await appendJournal({ brand: b.key, type: 'change', title: `Woo: ${okN} produkt(er) uppdaterade${results.length - okN ? `, ${results.length - okN} misslyckades` : ''}`, detail: updates.map((u) => `#${u.id}: ${Object.keys(u).filter((k) => k !== 'id' && k !== 'parent_id').join(', ')}`).join('; ').slice(0, 4000), refs: { product_ids: updates.map((u) => u.id).join(',') }, source: 'woo_products_update' }).catch(() => undefined);
         return textResult({ brand: b.key, updated: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok), results });
       } catch (e) {
         return errorResult(e);
