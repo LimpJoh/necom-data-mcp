@@ -35,6 +35,7 @@ export interface StoredBrand {
 export interface Settings {
   stripe_secret_key?: string;
   mollie_access_token?: string;
+  meta_access_token?: string;
   ops_enabled?: boolean;
   ops_github_token?: string;
   ops_github_owner?: string;

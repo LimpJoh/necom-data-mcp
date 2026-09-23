@@ -45,6 +45,9 @@ export const config = {
   get mollieAccessToken(): string {
     return setting('mollie_access_token', 'MOLLIE_ACCESS_TOKEN');
   },
+  get metaAccessToken(): string {
+    return setting('meta_access_token', 'META_ACCESS_TOKEN');
+  },
   dogshowpro: {
     get url(): string {
       return process.env.DOGSHOWPRO_SUPABASE_URL ?? brands().find((b) => b.key === 'dogshowpro')?.supabase?.url ?? '';

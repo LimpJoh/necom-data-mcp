@@ -34,6 +34,17 @@ En fil per varumärke i `data/journal/<brand>.jsonl` (+ `platform` för MCP/infr
 | `journal_resolve` | Markera issue/checkpoint som löst. |
 | `journal_overview` | En rad per varumärke – start för veckoanalysen. |
 
+## Kampanjkarta (v1.5)
+
+Admin → Kampanjkarta: grafvy kampanj → adset → annons med kreativ-bild, 7d/30d-nyckeltal, färg mot mål-MER/break-even, beskrivning per nod och journalposter kopplade via id. Servern synkar själv från Meta Graph API (system user-token med `ads_read` under Inställningar) vid start och var 6:e timme; utan token skickar Claude in kartan med `meta_map_put`.
+
+| Verktyg | Gör |
+|---|---|
+| `meta_map_get` | Hela kartan med bedömning, thumbnails, beskrivningar och journal per nod. |
+| `meta_map_sync` | Synka från Meta nu (kräver token). |
+| `meta_map_put` | Skicka in struktur + nyckeltal från Meta Ads MCP. |
+| `meta_map_note` | Övergripande beskrivning eller beskrivning/bedömning på en nod. |
+
 ## Produktverktyg (WooCommerce, v1.3)
 
 | Verktyg | Gör |

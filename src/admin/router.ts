@@ -10,6 +10,7 @@ import { brands, brandCard } from '../brands.js';
 import { loadStore, upsertBrand, deleteBrand, updateSettings, storeSync, type StoredBrand } from '../store.js';
 import { checkAll, checkBrand, serviceAccountEmail } from './health.js';
 import { readJournal, appendJournal, brandStatus, ENTRY_TYPES, type EntryType } from '../journal.js';
+import { enrichedMap, syncFromGraph, loadNotes, saveNotes } from '../meta/map.js';
 
 interface Session {
   csrf: string;
@@ -79,6 +80,7 @@ function page(title: string, body: string, active = '', flash?: { ok?: string; e
     ['/admin', 'Översikt'],
     ['/admin/brands', 'Varumärken'],
     ['/admin/journal', 'Journal'],
+    ['/admin/map', 'Kampanjkarta'],
     ['/admin/settings', 'Inställningar'],
     ['/admin/connect', 'Koppla Claude'],
   ]
@@ -345,6 +347,9 @@ ${b.checks.map((c) => `<div class="chk"><span class="dot ${statusClass(c.status)
 <div class="card"><h2>Betalleverantörer</h2><div class="two">
 <div><label>Stripe restricted key ${has(config.stripeSecretKey)}</label><input name="stripe_secret_key" type="password" autocomplete="new-password" placeholder="rk_live_…"></div>
 <div><label>Mollie organisationstoken ${has(config.mollieAccessToken)}</label><input name="mollie_access_token" type="password" autocomplete="new-password"></div></div></div>
+<div class="card"><h2>Meta (kampanjkartan)</h2>
+<div><label>System user-token, behörighet <code>ads_read</code> ${has(config.metaAccessToken)}</label><input name="meta_access_token" type="password" autocomplete="new-password" placeholder="EAAG…"></div>
+<p class="small muted">Business Manager → Företagsinställningar → Användare → Systemanvändare → Lägg till → tilldela annonskontona (läsbehörighet) → Generera token med <code>ads_read</code>, ingen utgångstid. Servern synkar kampanj → adset → annons med bilder och nyckeltal vid start och var 6:e timme; "Synka nu" finns på kartan.</p></div>
 <div class="card"><h2>Ops-lager (skrivande verktyg för nya projekt)</h2>
 <label><input type="checkbox" name="ops_enabled" value="1" ${config.ops.enabled ? 'checked' : ''} style="width:auto;margin-right:.5rem">Aktivera ops_*-verktyg (kräver omstart av containern: <code>docker compose restart</code>)</label>
 <div class="two">
@@ -373,6 +378,7 @@ ${b.checks.map((c) => `<div class="chk"><span class="dot ${statusClass(c.status)
     await updateSettings({
       stripe_secret_key: f.stripe_secret_key?.trim(),
       mollie_access_token: f.mollie_access_token?.trim(),
+      meta_access_token: f.meta_access_token?.trim(),
       ops_enabled: f.ops_enabled === '1',
       ops_github_token: f.ops_github_token?.trim(),
       ops_github_owner: f.ops_github_owner?.trim(),
@@ -468,6 +474,116 @@ ${b.checks.map((c) => `<div class="chk"><span class="dot ${statusClass(c.status)
     if (!f.title?.trim()) return res.redirect('/admin/journal');
     await appendJournal({ brand: f.brand || 'platform', type, title: f.title.trim().slice(0, 200), detail: f.detail?.trim() || undefined, next_check: /^\d{4}-\d{2}-\d{2}$/.test(f.next_check ?? '') ? f.next_check : undefined, source: 'admin' });
     return res.redirect('/admin/journal?ok=Post+sparad');
+  });
+
+  // ---------- Kampanjkarta ----------
+  r.get('/map', async (req, res) => {
+    await loadStore();
+    const s = (req as unknown as { session: Session }).session;
+    const all = brands().filter((b) => b.metaAccount);
+    const brand = typeof req.query.brand === 'string' && all.some((b) => b.key === req.query.brand) ? String(req.query.brand) : all[0]?.key ?? '';
+    const tabs = all.map((b) => `<a class="btn ${b.key === brand ? '' : 'sec'}" style="margin:0 .5rem .5rem 0" href="/admin/map?brand=${esc(b.key)}">${esc(b.name)}</a>`).join('');
+    const body = `<div class="row"><h1>Kampanjkarta</h1><form method="post" action="/admin/map/sync" style="margin:0"><input type="hidden" name="_csrf" value="${s.csrf}"><input type="hidden" name="brand" value="${esc(brand)}"><button class="btn sec" style="margin:0" ${config.metaAccessToken ? '' : 'disabled title="Lägg in Meta-token under Inställningar"'}>Synka nu</button></form></div>
+<div>${tabs || '<p class="muted">Inga varumärken med Meta-konto.</p>'}</div>
+<div id="meta" class="card small muted">Laddar…</div>
+<div style="display:grid;grid-template-columns:1fr 360px;gap:1rem" id="wrap"><div class="card" style="overflow:auto;padding:0;position:relative;min-height:400px"><div id="graph" style="position:relative;min-width:960px"></div></div>
+<div class="card" id="panel"><p class="muted small">Klicka på en nod för detaljer, journal och beskrivning.</p></div></div>
+<style>
+.node{position:absolute;width:250px;background:#0e1628;border:1px solid var(--line);border-radius:10px;padding:.55rem .7rem;cursor:pointer;font-size:.82rem;box-shadow:0 1px 0 #000}
+.node:hover,.node.sel{border-color:var(--acc)}
+.node .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .k{color:var(--mut);display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.25rem}
+.node img{width:100%;height:110px;object-fit:cover;border-radius:6px;margin:.35rem 0 .2rem;background:#000}
+.g-green{border-left:4px solid var(--ok)}.g-yellow{border-left:4px solid var(--warn)}.g-red{border-left:4px solid var(--err)}.g-grey{border-left:4px solid var(--off)}
+.st{font-size:.7rem;padding:.05rem .35rem;border-radius:4px;background:#1f2a3d;color:var(--mut);margin-left:.3rem}
+.st.ACTIVE{background:#0f2a1a;color:var(--ok)}.st.PAUSED{background:#2a2410;color:var(--warn)}.st.DISAPPROVED,.st.WITH_ISSUES{background:#2a0f0f;color:var(--err)}
+svg.links{position:absolute;left:0;top:0;pointer-events:none}
+#panel h3{margin:.2rem 0 .4rem;font-size:1rem}#panel .j{border-top:1px solid var(--line);padding:.4rem 0;font-size:.85rem}
+#panel textarea{min-height:80px;font-family:inherit;font-size:.9rem}
+@media(max-width:900px){#wrap{grid-template-columns:1fr}}
+</style>
+<script>
+(async function(){
+  const brand=${JSON.stringify(brand)};
+  const csrf=${JSON.stringify(s.csrf)};
+  if(!brand) return;
+  const res=await fetch('/admin/map/data?brand='+encodeURIComponent(brand));
+  const d=await res.json();
+  const fmt=(n,dec)=>n===null||n===undefined?'–':Number(n).toLocaleString('sv-SE',{maximumFractionDigits:dec??0});
+  const meta=document.getElementById('meta');
+  meta.className='card';
+  meta.innerHTML='<div class="row"><div><b>'+esc(d.name)+'</b> <span class="muted small">'+(d.updated_at?'synkad '+d.updated_at.replace('T',' ').slice(0,16)+' ('+d.source+')':'ingen karta än – kör Synka nu eller meta_map_put')+'</span><br><span class="small muted">Mål-MER '+fmt(d.target_mer,1)+' · break-even ROAS '+fmt(d.break_even_roas,2)+'</span></div>'
+    +'<div class="small" style="text-align:right"><span class="dot ok"></span>≥ mål <span class="dot warn"></span>≥ break-even <span class="dot err"></span>under <span class="dot off"></span>&lt;100 kr</div></div>'
+    +'<div style="margin-top:.6rem"><label>Övergripande beskrivning</label><textarea id="desc" style="min-height:60px">'+esc(d.description||'')+'</textarea><button class="btn sec" style="margin-top:.4rem" onclick="saveNote(\\'\\',document.getElementById(\\'desc\\').value)">Spara beskrivning</button></div>'
+    +(d.last_report?'<div class="small" style="margin-top:.6rem"><b>Senaste rapport</b> <span class="muted">'+d.last_report.ts.replace('T',' ').slice(0,16)+'</span><br>'+esc(d.last_report.title)+(d.last_report.detail?'<br><span class="muted">'+esc(d.last_report.detail).slice(0,500)+'</span>':'')+'</div>':'');
+  // layout
+  const g=document.getElementById('graph');const W=250,X=[20,340,660],H={c:70,s:96,a:200},GAP=14;
+  let y=[20,20,20];const nodes=[],links=[];
+  function add(col,obj,kind,parent){const h=H[kind];const top=y[col];y[col]+=h+GAP;nodes.push({col,obj,kind,top,h,id:obj.id});if(parent)links.push([parent,obj.id]);return obj.id;}
+  for(const c of d.campaigns){const cid=add(0,c,'c');for(const sset of c.adsets){const sTop=y[1];const sid=add(1,sset,'s',cid);y[2]=Math.max(y[2],sTop);for(const a of sset.ads)add(2,a,'a',sid);
+      // adset minst lika hög som sina annonser
+      y[1]=Math.max(y[1],y[2]);}
+    y[0]=Math.max(y[0],y[1],y[2]);y[1]=y[0];y[2]=y[0];}
+  const total=Math.max(y[0],y[1],y[2])+20;g.style.height=total+'px';
+  const byId={};
+  for(const n of nodes){const o=n.obj,m=o.m7||{};const el=document.createElement('div');el.className='node g-'+o.grade;el.style.left=X[n.col]+'px';el.style.top=n.top+'px';
+    const img=n.kind==='a'&&o.creative&&(o.creative.image_url||o.creative.thumbnail_url)?'<img src="'+esc(o.creative.image_url||o.creative.thumbnail_url)+'" loading="lazy">':'';
+    const budget=o.daily_budget?'<span>'+fmt(o.daily_budget)+' kr/d</span>':'';
+    el.innerHTML='<div class="t" title="'+esc(o.name)+'">'+esc(o.name)+'<span class="st '+esc(o.status)+'">'+esc(o.status)+'</span></div>'+img+'<div class="k">'+budget+'<span>7d '+fmt(m.spend)+' kr</span><span>'+fmt(m.purchases)+' köp</span><span>CPA '+fmt(m.cpa)+'</span><span>ROAS '+fmt(m.roas,2)+'</span></div>'+(o.note?'<div class="small" style="color:var(--acc);margin-top:.2rem">'+esc(o.note).slice(0,90)+'</div>':'');
+    el.onclick=()=>select(n);g.appendChild(el);byId[o.id]=n;n.el=el;}
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','links');svg.setAttribute('width',X[2]+W+40);svg.setAttribute('height',total);
+  for(const [p,c] of links){const a=byId[p],b=byId[c];if(!a||!b)continue;const x1=X[a.col]+W,y1=a.top+22,x2=X[b.col],y2=b.top+22;const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M'+x1+','+y1+' C'+(x1+45)+','+y1+' '+(x2-45)+','+y2+' '+x2+','+y2);path.setAttribute('stroke','#2b3a52');path.setAttribute('fill','none');path.setAttribute('stroke-width','1.5');svg.appendChild(path);}
+  g.appendChild(svg);
+  function mrow(l,m){m=m||{};return '<tr><td class="muted">'+l+'</td><td>'+fmt(m.spend)+'</td><td>'+fmt(m.purchases)+'</td><td>'+fmt(m.cpa)+'</td><td>'+fmt(m.roas,2)+'</td><td>'+fmt(m.ctr,2)+'</td><td>'+fmt(m.frequency,2)+'</td></tr>';}
+  function select(n){for(const x of nodes)x.el.classList.toggle('sel',x===n);const o=n.obj;const kind={c:'Kampanj',s:'Adset',a:'Annons'}[n.kind];
+    let h='<h3>'+esc(o.name)+'</h3><div class="small muted">'+kind+' · '+esc(o.id)+' · '+esc(o.status)+(o.objective?' · '+esc(o.objective):'')+(o.optimization_goal?' · '+esc(o.optimization_goal):'')+(o.created_time?' · skapad '+o.created_time.slice(0,10):'')+'</div>';
+    if(o.targeting_summary)h+='<div class="small" style="margin-top:.3rem">'+esc(o.targeting_summary)+'</div>';
+    if(o.creative){h+=(o.creative.image_url||o.creative.thumbnail_url?'<img src="'+esc(o.creative.image_url||o.creative.thumbnail_url)+'" style="width:100%;border-radius:8px;margin:.5rem 0">':'')+(o.creative.title?'<div><b>'+esc(o.creative.title)+'</b></div>':'')+(o.creative.body?'<div class="small muted">'+esc(o.creative.body)+'</div>':'');}
+    h+='<table style="margin-top:.5rem"><thead><tr><th></th><th>Spend</th><th>Köp</th><th>CPA</th><th>ROAS</th><th>CTR</th><th>Frekv.</th></tr></thead><tbody>'+mrow('7d',o.m7)+mrow('30d',o.m30)+'</tbody></table>';
+    h+='<label>Beskrivning / bedömning</label><textarea id="nn">'+esc(o.note||'')+'</textarea><button class="btn sec" style="margin-top:.4rem" onclick="saveNote(\\''+esc(o.id)+'\\',document.getElementById(\\'nn\\').value)">Spara</button>';
+    h+='<h3 style="margin-top:1rem">Journal</h3>'+(o.journal.length?o.journal.map(j=>'<div class="j"><span class="muted small">'+j.ts.replace('T',' ').slice(0,16)+' · '+j.type+(j.resolved?' · löst':'')+'</span><br><b>'+esc(j.title)+'</b>'+(j.detail?'<br><span class="small muted">'+esc(j.detail)+'</span>':'')+(j.next_check?'<br><span class="small" style="color:var(--warn)">checkpoint '+j.next_check+'</span>':'')+'</div>').join(''):'<p class="muted small">Inga journalposter refererar till detta id.</p>');
+    document.getElementById('panel').innerHTML=h;}
+  window.saveNote=async function(id,text){const f=new URLSearchParams({_csrf:csrf,brand,node_id:id,text});const r=await fetch('/admin/map/note',{method:'POST',body:f});if(r.ok)location.reload();else alert('Kunde inte spara');};
+  function esc(x){return String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+})();
+</script>`;
+    res.type('html').send(page('Kampanjkarta', body, '/admin/map', req.query.ok ? { ok: String(req.query.ok) } : req.query.err ? { err: String(req.query.err) } : undefined));
+  });
+
+  r.get('/map/data', async (req, res) => {
+    try {
+      await loadStore();
+      res.json(await enrichedMap(String(req.query.brand ?? '')));
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+    }
+  });
+
+  r.post('/map/sync', async (req, res) => {
+    if (!csrfOk(req)) return res.status(403).send('CSRF');
+    const brand = String((req.body as Record<string, string>).brand ?? '');
+    try {
+      if (!config.metaAccessToken) throw new Error('Ingen Meta-token – lägg in under Inställningar.');
+      const m = await syncFromGraph(brands().find((b) => b.key === brand)!, config.metaAccessToken);
+      return res.redirect(`/admin/map?brand=${encodeURIComponent(brand)}&ok=${encodeURIComponent(`Synkad: ${m.campaigns.length} kampanjer`)}`);
+    } catch (e) {
+      return res.redirect(`/admin/map?brand=${encodeURIComponent(brand)}&err=${encodeURIComponent((e as Error).message)}`);
+    }
+  });
+
+  r.post('/map/note', async (req, res) => {
+    if (!csrfOk(req)) return res.status(403).send('CSRF');
+    const f = req.body as Record<string, string>;
+    const brand = String(f.brand ?? '');
+    if (!brands().some((b) => b.key === brand)) return res.status(400).send('Okänt varumärke');
+    const n = await loadNotes(brand);
+    const text = String(f.text ?? '').trim().slice(0, 2000);
+    if (f.node_id) {
+      if (text) n.nodes[f.node_id] = text;
+      else delete n.nodes[f.node_id];
+    } else n.description = text || undefined;
+    await saveNotes(brand, n);
+    return res.status(204).end();
   });
 
   return r;
