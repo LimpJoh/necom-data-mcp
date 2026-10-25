@@ -169,6 +169,27 @@ export function containsSecret(input: string): boolean {
   return classify(input).length > 0;
 }
 
+/**
+ * Rollerna i de JWT-formade värdena i texten – för triage, inte för maskering.
+ * Skillnaden är hela rotationsbeslutet: en Supabase `anon`-nyckel är publik by design och
+ * ligger redan i klientbundlar, medan en `service_role`-nyckel går förbi RLS och måste
+ * roteras. Returnerar bara rollnamn, aldrig tokens.
+ */
+export function jwtRoles(input: string): string[] {
+  if (!input) return [];
+  const out: string[] = [];
+  const re = /\beyJ[A-Za-z0-9_-]{10,}\.([A-Za-z0-9_-]{10,})(?:\.[A-Za-z0-9_-]{10,})?/g;
+  for (const m of input.matchAll(re)) {
+    try {
+      const claims = JSON.parse(Buffer.from(m[1], 'base64url').toString('utf8')) as { role?: unknown };
+      out.push(typeof claims.role === 'string' ? claims.role : 'ingen_roll');
+    } catch {
+      out.push('okand');
+    }
+  }
+  return out;
+}
+
 /** Maskerar varje sträng i ett objekt/array rekursivt. Nycklar lämnas orörda. */
 export function redactDeep<T>(value: T): T {
   if (typeof value === 'string') return redact(value) as unknown as T;

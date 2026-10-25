@@ -18,7 +18,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { config } from './config.js';
 import { brands, getBrand } from './brands.js';
 import { textResult, errorResult } from './util.js';
-import { classify, redact, redactDeep, type SecretClass } from './redact.js';
+import { classify, jwtRoles, redact, redactDeep, type SecretClass } from './redact.js';
 
 export const ENTRY_TYPES = ['change', 'decision', 'report', 'checkpoint', 'issue', 'note', 'deploy'] as const;
 export type EntryType = (typeof ENTRY_TYPES)[number];
@@ -131,25 +131,29 @@ export async function scanJournalSecrets(brand?: string): Promise<{
   by_type: Record<string, number>;
   by_source: Record<string, number>;
   by_class: Record<string, number>;
+  jwt_roles: Record<string, number>;
   note: string;
 }> {
   const by_brand: Record<string, number> = {};
   const by_type: Record<string, number> = {};
   const by_source: Record<string, number> = {};
   const by_class: Record<string, number> = {};
+  const jwt_roles: Record<string, number> = {};
   let total = 0;
   let affected = 0;
 
   for (const b of brand ? [brand] : await journalBrands()) {
     for (const e of await readFile(b)) {
       total++;
-      const classes = classify(entryText(e));
+      const text = entryText(e);
+      const classes = classify(text);
       if (!classes.length) continue;
       affected++;
       bump(by_brand, b);
       bump(by_type, e.type);
       bump(by_source, e.source ?? 'unknown');
       for (const c of classes) bump(by_class, c);
+      for (const role of jwtRoles(text)) bump(jwt_roles, role);
     }
   }
 
@@ -161,7 +165,8 @@ export async function scanJournalSecrets(brand?: string): Promise<{
     by_type,
     by_source,
     by_class,
-    note: 'Bara antal. Inga värden, inga post-id:n. by_class summerar högre än affected_entries när en post bär flera klasser.',
+    jwt_roles,
+    note: 'Bara antal. Inga värden, inga post-id:n. by_class summerar högre än affected_entries när en post bär flera klasser. jwt_roles räknar förekomster, inte poster: role=anon är publik by design, role=service_role går förbi RLS och ska roteras.',
   };
 }
 
@@ -365,7 +370,7 @@ export function registerJournalTools(server: McpServer): void {
     {
       title: 'Journal – inventera credential-formade strängar (bara antal)',
       description:
-        'Räknar hur många journalposter som innehåller credential-formade strängar (JWT, kända tokenprefix, NAME=värde, Authorization-headers, lösenord i URL:er m.m.), fördelat på varumärke, posttyp, källa och klass. Returnerar aldrig värden eller post-id:n. Läsande – ändrar inget.',
+        'Räknar hur många journalposter som innehåller credential-formade strängar (JWT, kända tokenprefix, NAME=värde, Authorization-headers, lösenord i URL:er m.m.), fördelat på varumärke, posttyp, källa och klass, plus JWT-roller för triage. Returnerar aldrig värden eller post-id:n. Läsande – ändrar inget.',
       inputSchema: { brand: z.string().optional() },
     },
     async ({ brand }) => {
@@ -399,7 +404,7 @@ export function registerJournalTools(server: McpServer): void {
           brand: 'platform',
           type: 'change',
           title: 'journal_scrub_secrets: maskerade credential-formade strängar',
-          detail: `Poster med träff före: ${before.affected_entries}, efter: ${after.affected_entries}, maskerade: ${res.redacted_total}. Klasser före: ${JSON.stringify(before.by_class)}. Säkerhetskopior: ${res.brands.filter((b) => b.backup).map((b) => b.backup).join(', ') || 'inga'}. Inga värden loggade.`,
+          detail: `Poster med träff före: ${before.affected_entries}, efter: ${after.affected_entries}, maskerade: ${res.redacted_total}. Klasser före: ${JSON.stringify(before.by_class)}. JWT-roller före: ${JSON.stringify(before.jwt_roles)}. Säkerhetskopior: ${res.brands.filter((b) => b.backup).map((b) => b.backup).join(', ') || 'inga'}. Inga värden loggade.`,
           source: 'journal_scrub_secrets',
         }).catch(() => undefined);
         return textResult({ ...res, affected_before: before.affected_entries, affected_after: after.affected_entries });
