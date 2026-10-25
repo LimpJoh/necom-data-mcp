@@ -7,6 +7,9 @@
  *  - Alla skrivande anrop kräver `confirm: true` och loggas till OPS_AUDIT_LOG (data/ops-audit.log).
  *  - Tokens ligger i .env på servern; inget returneras till klienten.
  *  - vps_exec kör som OPS_SSH_USER (rekommenderat: en `deploy`-användare med sudo bara för caddy reload).
+ *  - Loggning sker i två nivåer: ops-audit-loggen får hela det redigerade anropet (ligger i
+ *    datamappen, 0700, läses bara när någon aktivt tittar), journalen får en sammanfattning
+ *    utan kommandotext (läses av varje agent vid varje heartbeat). Båda passerar redact().
  */
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
@@ -16,13 +19,28 @@ import { config } from '../config.js';
 import { brands, brandCard } from '../brands.js';
 import { textResult, errorResult } from '../util.js';
 import { appendJournal } from '../journal.js';
+import { redact, redactDeep, summarizeCommand } from '../redact.js';
 
 const ops = config.ops;
 
-async function audit(action: string, detail: unknown): Promise<void> {
-  const line = JSON.stringify({ ts: new Date().toISOString(), action, detail }) + '\n';
+/**
+ * Loggar en skrivande åtgärd.
+ *
+ * `detail` går till ops-audit-loggen, `journalDetail` till journalen. Skicka alltid en egen
+ * `journalDetail` när `detail` innehåller kommandotext, SQL eller kommandoutdata: journalen
+ * läses av varje agent vid varje heartbeat och ska svara på vad som gjordes, inte reproducera
+ * anropet. Båda redigeras genom redact() oavsett – det är sista spärren, inte första.
+ */
+async function audit(action: string, detail: unknown, journalDetail?: unknown): Promise<void> {
+  const line = redact(JSON.stringify({ ts: new Date().toISOString(), action, detail: redactDeep(detail) })) + '\n';
   await fs.appendFile(ops.auditLog, line).catch(() => undefined);
-  await appendJournal({ brand: 'platform', type: action === 'vps_exec' || action === 'caddy_add_site' ? 'deploy' : 'change', title: `ops: ${action}`, detail: JSON.stringify(detail).slice(0, 4000), source: `ops_${action}` }).catch(() => undefined);
+  await appendJournal({
+    brand: 'platform',
+    type: action === 'vps_exec' || action === 'caddy_add_site' ? 'deploy' : 'change',
+    title: `ops: ${action}`,
+    detail: JSON.stringify(redactDeep(journalDetail ?? detail)).slice(0, 4000),
+    source: `ops_${action}`,
+  }).catch(() => undefined);
 }
 
 function needConfirm(confirm: boolean | undefined, what: string): void {
@@ -217,7 +235,7 @@ export function registerOpsTools(server: McpServer): void {
         const readOnly = /^\s*(select|with|explain)\b/i.test(sql) && !/;\s*\S/.test(sql.trim().replace(/;$/, ''));
         if (!readOnly) needConfirm(confirm, `köra SQL i ${project_ref}`);
         const res = await sbm<unknown>('POST', `/v1/projects/${project_ref}/database/query`, { query: sql });
-        if (!readOnly) await audit('supabase_run_sql', { project_ref, sql: sql.slice(0, 2000) });
+        if (!readOnly) await audit('supabase_run_sql', { project_ref, sql: sql.slice(0, 2000) }, { project_ref, sql: summarizeCommand(sql, 200) });
         return textResult({ project_ref, read_only: readOnly, result: res });
       } catch (e) {
         return errorResult(e);
@@ -293,7 +311,7 @@ export function registerOpsTools(server: McpServer): void {
         const readOnly = /^\s*(ls|cat|head|tail|grep|docker (ps|logs|images|compose ls)|pm2 (list|ls|logs|status)|ss|df|free|uptime|systemctl status|caddy validate|git (status|log))\b/.test(command) && !/[|;&>]\s*(rm|mv|cp|tee|sh|bash)\b/.test(command);
         if (!readOnly) needConfirm(confirm, `köra "${command.slice(0, 80)}" på VPS:en`);
         const res = await ssh(command, (timeout_seconds ?? 120) * 1000);
-        if (!readOnly) await audit('vps_exec', { command, code: res.code });
+        if (!readOnly) await audit('vps_exec', { command, code: res.code }, { command: summarizeCommand(command), code: res.code, stdout_bytes: res.stdout.length });
         return textResult(res);
       } catch (e) {
         return errorResult(e);
@@ -335,7 +353,7 @@ export function registerOpsTools(server: McpServer): void {
         const block = `\n${hostname} {\n\tencode gzip\n\treverse_proxy 127.0.0.1:${port} {\n\t\tflush_interval -1\n\t}\n}\n`;
         const script = `grep -q '^${hostname} ' ${file} && echo EXISTS || { printf '%s' '${block.replace(/'/g, "'\\''")}' | sudo tee -a ${file} >/dev/null && sudo caddy validate --config ${file} && sudo systemctl reload caddy && echo ADDED; }`;
         const res = await ssh(script);
-        await audit('caddy_add_site', { hostname, port, code: res.code, out: res.stdout.trim() });
+        await audit('caddy_add_site', { hostname, port, code: res.code, out: res.stdout.trim() }, { hostname, port, code: res.code });
         return textResult(res);
       } catch (e) {
         return errorResult(e);
