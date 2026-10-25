@@ -20,17 +20,19 @@ import { registerJournalTools } from './journal.js';
 import { registerMetaMapTools, syncAll as syncMetaMaps } from './meta/map.js';
 import { adminRouter } from './admin/router.js';
 import { loadStore } from './store.js';
+import { registerDigestTools, scheduleDigest } from './digest.js';
 
 function buildServer(): McpServer {
   const server = new McpServer(
-    { name: 'necom-data', version: '1.5.0' },
+    { name: 'necom-data', version: '1.6.0' },
     {
       instructions:
-        'NeCom butiksdata, journal och ops. Börja ALLTID med brand_status <brand> (senaste ändring, nästa checkpoint, öppna problem) och brand_list (Meta-ID:n, marginal). Logga varje skrivande åtgärd, beslut och rapport med journal_add. sales_summary/mer_summary fungerar för alla varumärken; woo_* för WooCommerce-detaljer, supabase_sales_breakdown för egna plattformar, ga4_*, gsc_*, stripe_*/mollie_* för respektive källa. ' +
+        'NeCom butiksdata, journal och ops. Börja ALLTID med daily_digest (cachad, billig) och gå bara vidare om en flagga eller uppgiften kräver det; därefter brand_status <brand> (senaste ändring, nästa checkpoint, öppna problem) och brand_list (Meta-ID:n, marginal). Logga varje skrivande åtgärd, beslut och rapport med journal_add. sales_summary/mer_summary fungerar för alla varumärken; woo_* för WooCommerce-detaljer, supabase_sales_breakdown för egna plattformar, ga4_*, gsc_*, stripe_*/mollie_* för respektive källa. ' +
         'Datum: YYYY-MM-DD eller relativt ("7d"). För MER: hämta annonskostnad från Meta Ads MCP och skicka in i mer_summary. Persondata returneras aldrig. ' +
         'ops_*-verktyg (om aktiva) ändrar infrastruktur: skrivande anrop kräver confirm=true – be alltid Linus om ja och beskriv exakt vad som händer.',
     },
   );
+  registerDigestTools(server);
   registerJournalTools(server);
   registerMetaMapTools(server);
   registerSalesTools(server);
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
   app.get('/health', (_req, res) =>
     res.json({
       ok: true,
-      version: '1.5.0',
+      version: '1.6.0',
       brands: brands().map((b) => ({ key: b.key, platform: b.platform, sales: Boolean(b.woo || b.supabase), ga4: Boolean(b.ga4Property), gsc: Boolean(b.gscSite), meta: Boolean(b.metaAccount) })),
       ga4: ga4Configured(),
       stripe: Boolean(config.stripeSecretKey),
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
   // Kampanjkartan: synka vid start och var 6:e timme om Meta-token finns.
   setTimeout(() => void syncMetaMaps('start'), 5_000);
   setInterval(() => void syncMetaMaps('schemalagd'), 6 * 3600_000);
+  scheduleDigest();
 
   const host = process.env.HOST ?? '127.0.0.1';
   app.listen(config.port, host, () => {
